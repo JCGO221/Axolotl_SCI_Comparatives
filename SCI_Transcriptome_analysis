@@ -1,0 +1,141 @@
+ #R script ##Creating raw counts matrices
+library("Rsubread")
+RatFC <- featureCounts(files = c("Rat_Intact.bam", "Rat_Intact2.bam", "Rat_Intact3.bam", "Rat_1dpi.bam", "Rat_1dpi2.bam", "Rat_1dpi3.bam", "Rat_6dpi.bam", "Rat_6dpi2.bam", "Rat_6dpi3.bam"), annot.ext = "RatBN7.2_genomic.gtf", isGTFAnnotationFile = TRUE, isPairedEnd = TRUE)
+Counts <- as.matrix(RatFC$counts)
+
+#DESeq analysis
+Time <- c("Intact", "Intact", "Intact", "1 dpi", "1 dpi", "1 dpi", "7 dpi", "7 dpi", "7 dpi")
+dfs <- data.frame(Time)
+row.names(dfs)<-colnames(Counts)
+library(DESeq2)
+dds <- DESeqDataSetFromMatrix(countData = Counts, colData = dfs, design= ~ Time)
+DE <- DESeq(dds)
+Res<-results(DE)
+
+#Heatmap
+library(pheatmap)
+vst <- vst(DE)
+sele <- which(Res$padj < 0.005)
+pheatmap(assay(vst)[sele, ], cluster_rows=TRUE, show_rownames=TRUE,
+         cluster_cols=FALSE, scale = "row", main = "Rat Spinal Cord DGE (row-based z-score)" )
+         
+#Volcano plots
+library(dplyr)
+top1d<- as.data.frame (results(DE, contrast=c("Time","1 dpi","Intact"))) #AQUÍ!!!!!!
+par(mar=c(5,5,5,5), cex=1.0, cex.main=1.4, cex.axis=1.4, cex.lab=1.4)
+top1pavolcano <- filter (top1d, log2FoldChange <(15))
+with(top1pavolcano, plot(log2FoldChange, -log10(padj), pch=20, main="Intact vs 1 dpi", cex=1.0, xlab=bquote(~Log[2]~fold~change), ylab=bquote(~-log[10]~Q~value)))
+with(subset(top1pavolcano, padj<0.005 & abs(log2FoldChange)>2), points(log2FoldChange, -log10(padj), pch=20, col="red", cex=0.5))
+abline(v=0, col="black", lty=3, lwd=1.0)
+abline(v=-2, col="black", lty=4, lwd=2.0)
+abline(v=2, col="black", lty=4, lwd=2.0)
+abline(h=-log10(max(top1pavolcano$pvalue[top1pavolcano$padj<0.05], na.rm=TRUE)), col="black", lty=4, lwd=2.0)
+table(top1d$padj < 0.005, top1d$log2FoldChange < (-2))
+table(top1d$padj < 0.005, top1d$log2FoldChange > (2))
+
+top7d<- as.data.frame (results(DE, contrast=c("Time","7 dpi","Intact")))
+par(mar=c(5,5,5,5), cex=1.0, cex.main=1.4, cex.axis=1.4, cex.lab=1.4)
+top7pavolcano <- filter (top7d, log2FoldChange >(-6))
+with(top7pavolcano, plot(log2FoldChange, -log10(padj), pch=20, main="Intact vs 7 dpi", cex=1.0, xlab=bquote(~Log[2]~fold~change), ylab=bquote(~-log[10]~Q~value)))
+with(subset(top7pavolcano, padj<0.005 & abs(log2FoldChange)>2), points(log2FoldChange, -log10(padj), pch=20, col="red", cex=0.5))
+abline(v=0, col="black", lty=3, lwd=1.0)
+abline(v=-2, col="black", lty=4, lwd=2.0)
+abline(v=2, col="black", lty=4, lwd=2.0)
+abline(h=-log10(max(top7pavolcano$pvalue[top7pavolcano$padj<0.08], na.rm=TRUE)), col="black", lty=4, lwd=2.0)
+table(top7d$padj < 0.005, top7d$log2FoldChange < (-2))
+table(top7d$padj < 0.005, top7d$log2FoldChange > (2))
+
+top17d<- as.data.frame (results(DE, contrast=c("Time","7 dpi","1 dpi")))
+par(mar=c(5,5,5,5), cex=1.0, cex.main=1.4, cex.axis=1.4, cex.lab=1.4)
+top17pavolcano <- filter (top17d, log2FoldChange >(-8))
+with(top17pavolcano, plot(log2FoldChange, -log10(padj), pch=20, main="1 dpi vs 7 dpi", cex=1.0, xlab=bquote(~Log[2]~fold~change), ylab=bquote(~-log[10]~Q~value)))
+with(subset(top17pavolcano, padj<0.005 & abs(log2FoldChange)>2), points(log2FoldChange, -log10(padj), pch=20, col="red", cex=0.5))
+abline(v=0, col="black", lty=3, lwd=1.0)
+abline(v=-2, col="black", lty=4, lwd=2.0)
+abline(v=2, col="black", lty=4, lwd=2.0)
+abline(h=-log10(max(top17pavolcano$pvalue[top17pavolcano$padj<0.05], na.rm=TRUE)), col="black", lty=4, lwd=2.0)
+table(top17d$padj < 0.005, top17d$log2FoldChange < (-2))
+table(top17d$padj < 0.005, top17d$log2FoldChange > (2))
+
+#Ordering DEGs by fold change values
+top1d[order(top1d$log2FoldChange),]
+top1d[order(top1d$log2FoldChange, decreasing = TRUE),]
+top7d[order(top7d$log2FoldChange),]
+top7d[order(top7d$log2FoldChange, decreasing = TRUE),]
+justtop7d <- filter (top7d, padj <(0.005))
+justtop7d[order(justtop7d$log2FoldChange, decreasing = TRUE),]
+rm (justtop7d)
+top17d[order(top17d$log2FoldChange),]
+top17d[order(top17d$log2FoldChange, decreasing = TRUE),]
+         
+#Top genes
+library(ggplot2)
+Intv1d <- data.frame (Gene =c("Loc120093869", "Loc120095894", "Loc120097508", "Loc120098514", "Nxpe5l1", "Trnap-agg_14", "Cxcl1", "Dio3", "Serpine1", "Slpi"), 
+                        Log2Fold_Change =c(-5.9, -5.6, -5.1, -4.8, -4.6, 8.3, 8.6, 9.0, 9.6, 10.4))
+Intv1d$Gene <- factor(Intv1d$Gene, levels=unique(Intv1d$Gene))
+ggplot(data=Intv1d, aes(x=Log2Fold_Change, y=Gene)) +
+  geom_bar(stat="identity", color="blue", fill="white") +theme_minimal() +ggtitle("Rat intact vs 1 dpi") + theme(text = element_text(size = 22))
+
+Intv7d <- data.frame (Gene =c("Slc25a31", "Srms", "Loc102550569", "Nek5", "Scd", "Crisp3", "Slpi", "Fcrl2", "Klra5", "Rt1-ce16"), 
+                        Log2Fold_Change =c(-3.7, -3.1, -2.5, -2.3, -2.2, 6.5, 7.0, 7.1, 7.4, 7.7))
+Intv7d$Gene <- factor(Intv7d$Gene, levels=unique(Intv7d$Gene))
+ggplot(data=Intv7d, aes(x=Log2Fold_Change, y=Gene)) +
+  geom_bar(stat="identity", color="blue", fill="white") +theme_minimal() +ggtitle("Rat intact vs 7 dpi") + theme(text = element_text(size = 22))
+
+Intv17d <- data.frame (Gene =c("Loc120093457", "Cgm4", "Gpx2", "Serpina3n", "Serpine1", "Loc102550019", "Loc120099847", "Loc120095894", "Loc120093869", "Loc120097508"), 
+                      Log2Fold_Change =c(-6.8, -6.0, -5.9, -5.3, -5.1, 5.2, 5.3, 6.1, 6.2, 7.9))
+Intv17d$Gene <- factor(Intv17d$Gene, levels=unique(Intv17d$Gene))
+ggplot(data=Intv17d, aes(x=Log2Fold_Change, y=Gene)) +
+  geom_bar(stat="identity", color="blue", fill="white") +theme_minimal()+ theme(text = element_text(size = 22))+ggtitle("Rat 1 dpi vs 7 dpi")
+  
+  #Gene ontology
+library(clusterProfiler)
+library(enrichplot)
+library(ggplot2)
+organism <- "org.Rn.eg.db" # Set desired organism
+BiocManager::install(organism, character.only = TRUE)
+library(organism, character.only = TRUE)
+original_gene_list <- top1d$log2FoldChange 
+names(original_gene_list) <- row.names(top1d) 
+gene_list<-na.omit(original_gene_list)# omit any NA values
+gene_list <- sort(gene_list, decreasing = TRUE) # sort the list in decreasing order (required for clusterProfiler)
+BiocManager::install("DOSE")
+library(DOSE)
+gseBP <- gseGO(geneList=gene_list, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 1, 
+             maxGSSize = 500, 
+             pvalueCutoff = 0.005, 
+             verbose = TRUE, 
+             OrgDb = organism, 
+             pAdjustMethod = "BH",
+             exponent = 1,
+             by= "fgsea") 
+dotplot(gseBP, showCategory=10, split=".sign") + facet_grid(.~.sign)
+
+list_7d <- top7d$log2FoldChange
+names(list_7d) <- row.names(top7d)
+list7d<-na.omit(list_7d)
+list7d <- sort(list7d, decreasing = TRUE)
+gseBP_7d <- gseGO(geneList=list7d, 
+               ont ="BP", 
+               keyType = "SYMBOL", 
+               minGSSize = 10, 
+               maxGSSize = 500, 
+               pvalueCutoff = 0.005, 
+               verbose = TRUE, 
+               OrgDb = organism, 
+               pAdjustMethod = "BH",
+               exponent = 1,
+               by= "fgsea")
+dotplot(gseBP_7d, showCategory=10, split=".sign", font.size=10) + facet_grid(.~.sign)
+
+cnetplot(gseBP, categorySize="pvalue", foldChange=gene_list, showCategory = c("positive regulation of cytokine production","response to reactive oxygen species", "activation of immune response"), cex_label_category=1, color_category= "purple", shadowtext= "category", cex_category= 1, cex_label_gene= 0.8) + scale_color_gradient2(name='Score', low='steelblue', high='red') +scale_size_continuous(range = c(2, 8))
+library(ggrepel)
+BiocManager::install("ggnewscale")
+library(ggnewscale)
+cnetplot(gseBP_7d, categorySize="pvalue", foldChange=gene_list, showCategory = c("positive regulation of cytokine production","cell killing", "activation of immune response"), cex_label_category=1, color_category= "purple", shadowtext= "category", cex_category= 1, cex_label_gene= 0.8) + scale_color_gradient2(name='Score', low='steelblue', high='red') +scale_size_continuous(range = c(2, 8)) 
+
+
+         
