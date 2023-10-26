@@ -1,141 +1,522 @@
- #R script ##Creating raw counts matrices
-library("Rsubread")
-RatFC <- featureCounts(files = c("Rat_Intact.bam", "Rat_Intact2.bam", "Rat_Intact3.bam", "Rat_1dpi.bam", "Rat_1dpi2.bam", "Rat_1dpi3.bam", "Rat_6dpi.bam", "Rat_6dpi2.bam", "Rat_6dpi3.bam"), annot.ext = "RatBN7.2_genomic.gtf", isGTFAnnotationFile = TRUE, isPairedEnd = TRUE)
-Counts <- as.matrix(RatFC$counts)
+# R SCRIPT for SCI comparison analysis
 
-#DESeq analysis
+RatCounts<-read.csv("Rat_counts.csv")#Rat sequencing reads obtained from Rsubread after genome alignment
+MsCounts<-read.csv("Mus_counts.csv")##Mouse sequencing reads obtained from Rsubread after genome alignment
+
+#Gene expression Rat analysis
 Time <- c("Intact", "Intact", "Intact", "1 dpi", "1 dpi", "1 dpi", "7 dpi", "7 dpi", "7 dpi")
 dfs <- data.frame(Time)
-row.names(dfs)<-colnames(Counts)
+rownames(RatCounts)<-RatCounts$X
+RatCounts <- subset(RatCounts, select = -X)
+row.names(dfs)<-colnames(RatCounts)
+dfs
+
 library(DESeq2)
-dds <- DESeqDataSetFromMatrix(countData = Counts, colData = dfs, design= ~ Time)
+dds <- DESeqDataSetFromMatrix(countData = RatCounts, colData = dfs, design= ~ Time)
 DE <- DESeq(dds)
 Res<-results(DE)
 
-#Heatmap
 library(pheatmap)
 vst <- vst(DE)
-sele <- which(Res$padj < 0.005)
+sele <- which(Res$padj < 0.005 & abs(Res$log2FoldChange)> 2)
 pheatmap(assay(vst)[sele, ], cluster_rows=TRUE, show_rownames=TRUE,
          cluster_cols=FALSE, scale = "row", main = "Rat Spinal Cord DGE (row-based z-score)" )
-         
-#Volcano plots
+source("C:/Users/ldg22/Desktop/Axolotl_mRNA/R2LS.r")
+deg_mat = RatCounts[sele,]#Subset
+scaled_deg_mat = t(apply(deg_mat, 1, function(x) scale(x)))
+colnames(scaled_deg_mat) = colnames(deg_mat)
+library("gplots")
+heatmap.2(scaled_deg_mat, Colv = FALSE, labRow = FALSE, trace = "none", col = "bluered")
+kNum=2
+hc=hclust(dist(scaled_deg_mat), method="ward.D2")
+memb=cutree(hc, k=kNum)
+order_cl <- c(which(memb==1),which(memb==2)#,which(memb==3), which(memb==4))
+
+clusters<-as.data.frame(memb)
 library(dplyr)
-top1d<- as.data.frame (results(DE, contrast=c("Time","1 dpi","Intact"))) #AQUÍ!!!!!!
-par(mar=c(5,5,5,5), cex=1.0, cex.main=1.4, cex.axis=1.4, cex.lab=1.4)
-top1pavolcano <- filter (top1d, log2FoldChange <(15))
-with(top1pavolcano, plot(log2FoldChange, -log10(padj), pch=20, main="Intact vs 1 dpi", cex=1.0, xlab=bquote(~Log[2]~fold~change), ylab=bquote(~-log[10]~Q~value)))
-with(subset(top1pavolcano, padj<0.005 & abs(log2FoldChange)>2), points(log2FoldChange, -log10(padj), pch=20, col="red", cex=0.5))
-abline(v=0, col="black", lty=3, lwd=1.0)
-abline(v=-2, col="black", lty=4, lwd=2.0)
-abline(v=2, col="black", lty=4, lwd=2.0)
-abline(h=-log10(max(top1pavolcano$pvalue[top1pavolcano$padj<0.05], na.rm=TRUE)), col="black", lty=4, lwd=2.0)
-table(top1d$padj < 0.005, top1d$log2FoldChange < (-2))
-table(top1d$padj < 0.005, top1d$log2FoldChange > (2))
+cluster1<-filter(clusters, memb == "1")
+cluster2<-filter(clusters, memb == "2")
+#cluster3<-filter(clusters, memb == "3")
+#cluster4<-filter(clusters, memb == "4")
+cluster1<- as.vector(rownames(cluster1))
+cluster2<- as.vector(rownames(cluster2))
+#cluster3<- as.vector(rownames(cluster3))
+#cluster4<- as.vector(rownames(cluster4))
+rm(cluster3,cluster4)
+library(enrichR) 
+websiteLive <- getOption("enrichR.live") #access to EnrichR
+if (websiteLive) {
+  listEnrichrSites()     
+  setEnrichrSite("Enrichr")#To see databases
+} 
+if (websiteLive) dbs <- listEnrichrDbs() #List databases
+head(dbs) 
+dbs$libraryName #List databases
+dbs = c("Reactome_2022", "KEGG_2021_Human","GO_Molecular_Function_2023")#Choosing databases
 
-top7d<- as.data.frame (results(DE, contrast=c("Time","7 dpi","Intact")))
-par(mar=c(5,5,5,5), cex=1.0, cex.main=1.4, cex.axis=1.4, cex.lab=1.4)
-top7pavolcano <- filter (top7d, log2FoldChange >(-6))
-with(top7pavolcano, plot(log2FoldChange, -log10(padj), pch=20, main="Intact vs 7 dpi", cex=1.0, xlab=bquote(~Log[2]~fold~change), ylab=bquote(~-log[10]~Q~value)))
-with(subset(top7pavolcano, padj<0.005 & abs(log2FoldChange)>2), points(log2FoldChange, -log10(padj), pch=20, col="red", cex=0.5))
-abline(v=0, col="black", lty=3, lwd=1.0)
-abline(v=-2, col="black", lty=4, lwd=2.0)
-abline(v=2, col="black", lty=4, lwd=2.0)
-abline(h=-log10(max(top7pavolcano$pvalue[top7pavolcano$padj<0.08], na.rm=TRUE)), col="black", lty=4, lwd=2.0)
-table(top7d$padj < 0.005, top7d$log2FoldChange < (-2))
-table(top7d$padj < 0.005, top7d$log2FoldChange > (2))
+if (websiteLive) {
+  enriched1 <- enrichr(cluster1, dbs)
+} #Cluster 1 enrichment
 
-top17d<- as.data.frame (results(DE, contrast=c("Time","7 dpi","1 dpi")))
-par(mar=c(5,5,5,5), cex=1.0, cex.main=1.4, cex.axis=1.4, cex.lab=1.4)
-top17pavolcano <- filter (top17d, log2FoldChange >(-8))
-with(top17pavolcano, plot(log2FoldChange, -log10(padj), pch=20, main="1 dpi vs 7 dpi", cex=1.0, xlab=bquote(~Log[2]~fold~change), ylab=bquote(~-log[10]~Q~value)))
-with(subset(top17pavolcano, padj<0.005 & abs(log2FoldChange)>2), points(log2FoldChange, -log10(padj), pch=20, col="red", cex=0.5))
-abline(v=0, col="black", lty=3, lwd=1.0)
-abline(v=-2, col="black", lty=4, lwd=2.0)
-abline(v=2, col="black", lty=4, lwd=2.0)
-abline(h=-log10(max(top17pavolcano$pvalue[top17pavolcano$padj<0.05], na.rm=TRUE)), col="black", lty=4, lwd=2.0)
-table(top17d$padj < 0.005, top17d$log2FoldChange < (-2))
-table(top17d$padj < 0.005, top17d$log2FoldChange > (2))
+if (websiteLive) {
+  enriched2 <- enrichr(cluster2, dbs)
+} #Cluster 2 enrichment
 
-#Ordering DEGs by fold change values
-top1d[order(top1d$log2FoldChange),]
-top1d[order(top1d$log2FoldChange, decreasing = TRUE),]
-top7d[order(top7d$log2FoldChange),]
-top7d[order(top7d$log2FoldChange, decreasing = TRUE),]
-justtop7d <- filter (top7d, padj <(0.005))
-justtop7d[order(justtop7d$log2FoldChange, decreasing = TRUE),]
-rm (justtop7d)
-top17d[order(top17d$log2FoldChange),]
-top17d[order(top17d$log2FoldChange, decreasing = TRUE),]
-         
-#Top genes
+#if (websiteLive) {
+  #enriched3 <- enrichr(cluster3, dbs)
+#} 
+
+#if (websiteLive) {
+  #enriched4 <- enrichr(cluster4, dbs)
+#} 
+
+dataenrich<-enriched1[[1]]#Reactome
+
+library(dplyr)
+Rat1d<- as.data.frame (results(DE, contrast=c("Time","1 dpi","Intact")))
+Rat7d<- as.data.frame (results(DE, contrast=c("Time","7 dpi","Intact")))
+Rat1v7d<- as.data.frame (results(DE, contrast=c("Time","7 dpi","1 dpi")))
+temp <- Rat1d[order(Rat1d$log2FoldChange),]
+temp<-subset(temp, padj<0.005 & abs(log2FoldChange)>2)
+rm (temp)
+
 library(ggplot2)
-Intv1d <- data.frame (Gene =c("Loc120093869", "Loc120095894", "Loc120097508", "Loc120098514", "Nxpe5l1", "Trnap-agg_14", "Cxcl1", "Dio3", "Serpine1", "Slpi"), 
-                        Log2Fold_Change =c(-5.9, -5.6, -5.1, -4.8, -4.6, 8.3, 8.6, 9.0, 9.6, 10.4))
-Intv1d$Gene <- factor(Intv1d$Gene, levels=unique(Intv1d$Gene))
-ggplot(data=Intv1d, aes(x=Log2Fold_Change, y=Gene)) +
-  geom_bar(stat="identity", color="blue", fill="white") +theme_minimal() +ggtitle("Rat intact vs 1 dpi") + theme(text = element_text(size = 22))
+library(EnhancedVolcano)
+EnhancedVolcano(Rat1d, lab = rownames(Rat1d),
+                x = "log2FoldChange",
+                y = "padj",
+                title = "Rat Intact vs 1 dpi",
+                pCutoff = 0.005,
+                FCcutoff = 2,
+                pointSize = 3.0, #
+                labSize = 3.5, col=c('black', 'black', 'black', 'red3'),
+                colAlpha = 1,
+                gridlines.major = FALSE,
+                drawConnectors = TRUE,
+                widthConnectors = 0.75,
+                caption = bquote(~Log[2]~ "fold change cutoff, 2; q-value cutoff, 0.005",),
+                subtitle = "Differential expresion")
 
-Intv7d <- data.frame (Gene =c("Slc25a31", "Srms", "Loc102550569", "Nek5", "Scd", "Crisp3", "Slpi", "Fcrl2", "Klra5", "Rt1-ce16"), 
-                        Log2Fold_Change =c(-3.7, -3.1, -2.5, -2.3, -2.2, 6.5, 7.0, 7.1, 7.4, 7.7))
-Intv7d$Gene <- factor(Intv7d$Gene, levels=unique(Intv7d$Gene))
-ggplot(data=Intv7d, aes(x=Log2Fold_Change, y=Gene)) +
-  geom_bar(stat="identity", color="blue", fill="white") +theme_minimal() +ggtitle("Rat intact vs 7 dpi") + theme(text = element_text(size = 22))
+EnhancedVolcano(Rat7d, lab = rownames(Rat7d),
+                x = "log2FoldChange",
+                y = "padj",
+                title = "Rat Intact vs 7 dpi",
+                pCutoff = 0.005,
+                FCcutoff = 2,
+                pointSize = 3.0, 
+                labSize = 3.5, col=c('black', 'black', 'black', 'red3'),
+                colAlpha = 1,
+                gridlines.major = FALSE,
+                drawConnectors = TRUE,
+                widthConnectors = 0.75,
+                caption = bquote(~Log[2]~ "fold change cutoff, 2; q-value cutoff, 0.005",),
+                subtitle = "Differential expresion")
 
-Intv17d <- data.frame (Gene =c("Loc120093457", "Cgm4", "Gpx2", "Serpina3n", "Serpine1", "Loc102550019", "Loc120099847", "Loc120095894", "Loc120093869", "Loc120097508"), 
-                      Log2Fold_Change =c(-6.8, -6.0, -5.9, -5.3, -5.1, 5.2, 5.3, 6.1, 6.2, 7.9))
-Intv17d$Gene <- factor(Intv17d$Gene, levels=unique(Intv17d$Gene))
-ggplot(data=Intv17d, aes(x=Log2Fold_Change, y=Gene)) +
-  geom_bar(stat="identity", color="blue", fill="white") +theme_minimal()+ theme(text = element_text(size = 22))+ggtitle("Rat 1 dpi vs 7 dpi")
-  
-  #Gene ontology
+EnhancedVolcano(Rat1v7d, lab = rownames(Rat1v7d),
+                x = "log2FoldChange",
+                y = "padj",
+                title = "Rat 1 dpi vs 7 dpi",
+                pCutoff = 0.005,
+                FCcutoff = 2,
+                pointSize = 3.0, 
+                labSize = 3.5, col=c('black', 'black', 'black', 'red3'),
+                colAlpha = 1,
+                gridlines.major = FALSE,
+                drawConnectors = TRUE,
+                widthConnectors = 0.75,
+                caption = bquote(~Log[2]~ "fold change cutoff, 2; q-value cutoff, 0.005",),
+                subtitle = "Differential expresion")
+
 library(clusterProfiler)
 library(enrichplot)
 library(ggplot2)
-organism <- "org.Rn.eg.db" # Set desired organism
+organism <- "org.Rn.eg.db"
 BiocManager::install(organism, character.only = TRUE)
-library(organism, character.only = TRUE)
-original_gene_list <- top1d$log2FoldChange 
-names(original_gene_list) <- row.names(top1d) 
-gene_list<-na.omit(original_gene_list)# omit any NA values
-gene_list <- sort(gene_list, decreasing = TRUE) # sort the list in decreasing order (required for clusterProfiler)
-BiocManager::install("DOSE")
-library(DOSE)
-gseBP <- gseGO(geneList=gene_list, 
-             ont ="BP", 
-             keyType = "SYMBOL", 
-             minGSSize = 1, 
-             maxGSSize = 500, 
-             pvalueCutoff = 0.005, 
-             verbose = TRUE, 
-             OrgDb = organism, 
-             pAdjustMethod = "BH",
-             exponent = 1,
-             by= "fgsea") 
-dotplot(gseBP, showCategory=10, split=".sign") + facet_grid(.~.sign)
-
-list_7d <- top7d$log2FoldChange
-names(list_7d) <- row.names(top7d)
-list7d<-na.omit(list_7d)
-list7d <- sort(list7d, decreasing = TRUE)
-gseBP_7d <- gseGO(geneList=list7d, 
+temp <- Rat7d$log2FoldChange
+names(temp) <- row.names(Rat7d)
+temp
+temp<-na.omit(temp)
+temp <- sort(temp, decreasing = TRUE)
+gse <- gseGO(geneList=temp, 
                ont ="BP", 
                keyType = "SYMBOL", 
-               minGSSize = 10, 
-               maxGSSize = 500, 
+               minGSSize = 5, 
+               maxGSSize = 800, 
                pvalueCutoff = 0.005, 
                verbose = TRUE, 
                OrgDb = organism, 
                pAdjustMethod = "BH",
                exponent = 1,
                by= "fgsea")
-dotplot(gseBP_7d, showCategory=10, split=".sign", font.size=10) + facet_grid(.~.sign)
-
-cnetplot(gseBP, categorySize="pvalue", foldChange=gene_list, showCategory = c("positive regulation of cytokine production","response to reactive oxygen species", "activation of immune response"), cex_label_category=1, color_category= "purple", shadowtext= "category", cex_category= 1, cex_label_gene= 0.8) + scale_color_gradient2(name='Score', low='steelblue', high='red') +scale_size_continuous(range = c(2, 8))
+dotplot(gse, showCategory=10, split=".sign") + facet_grid(.~.sign)
 library(ggrepel)
-BiocManager::install("ggnewscale")
-library(ggnewscale)
-cnetplot(gseBP_7d, categorySize="pvalue", foldChange=gene_list, showCategory = c("positive regulation of cytokine production","cell killing", "activation of immune response"), cex_label_category=1, color_category= "purple", shadowtext= "category", cex_category= 1, cex_label_gene= 0.8) + scale_color_gradient2(name='Score', low='steelblue', high='red') +scale_size_continuous(range = c(2, 8)) 
+cnetplot(gse, categorySize="pvalue", foldChange=temp, showCategory = c("cell killing", "adaptive immune response", "mitochondrial respiratory chain complex assembly"), cex_label_category=1, color_category= "purple", shadowtext= "category", cex_category= 1, cex_label_gene= 0.8) + scale_color_gradient2(name='Score', low='steelblue', high='red') +scale_size_continuous(range = c(2, 8))
+rm(gse, temp, temp2)
+
+dropAsis <- function(x){
+  cls <- class(x)
+  structure(x, class = setdiff(cls, "AsIs"))
+}
+rescale.AsIs <- function(x, ...){
+  dropAsis <- function(x){
+    cls <- class(x)
+    structure(x, class = setdiff(cls, "AsIs"))
+  }
+  scales:::rescale(dropAsis(x), ...)
+}
+stopifnot(exists("rescale.AsIs"))
+cnetplot(gse, categorySize="pvalue", foldChange=temp,colorEdge = TRUE)
+
+library(ggplot2)
+R17d <- data.frame (Process =c("Chromosome organization", "Translation", "Ribonucleoprotein complex biogenesis", "Ribosome biogenesis", "ncRNA processing"), 
+                      Gene_Ratio =c(0.38, 0.52, 0.57, 0.61, 0.65))
+R17d$Process <- factor(R17d$Process, levels=unique(R17d$Process))
+ggplot(data=R17d, aes(x=Gene_Ratio, y=Process)) +
+  geom_bar(stat="identity", color="black", fill="white") +theme_minimal() +ggtitle("1 dpi vs 7 dpi") + theme(text = element_text(size = 22))
+rm(R17d)
+
+#Mouse Gene Expression Analysis:
+Time <- c("Intact", "Intact", "Intact", "2 dpi", "2 dpi", "2 dpi", "7 dpi", "7 dpi", "7 dpi")
+dfs <- data.frame(Time)
+rownames(MsCounts)<-MsCounts$X
+MsCounts <- subset(MsCounts, select = -X)
+row.names(dfs)<-colnames(MsCounts)
+dfs
+
+library(DESeq2)
+dds <- DESeqDataSetFromMatrix(countData = MsCounts, colData = dfs, design= ~ Time)
+DE <- DESeq(dds)
+Res<-results(DE)
+
+library(pheatmap)
+vst <- vst(DE)
+sele <- which(Res$padj < 0.005 & abs(Res$log2FoldChange)> 2)
+pheatmap(assay(vst)[sele, ], cluster_rows=TRUE, show_rownames=TRUE,
+         cluster_cols=FALSE, scale = "row", main = "Mouse Spinal Cord DGE (row-based z-score)" )
+
+deg_mat = MsCounts[sele,]#Subset
+scaled_deg_mat = t(apply(deg_mat, 1, function(x) scale(x)))
+colnames(scaled_deg_mat) = colnames(deg_mat)
+library("gplots")
+heatmap.2(scaled_deg_mat, Colv = FALSE, labRow = FALSE, trace = "none", col = "bluered")
+kNum=2
+hc=hclust(dist(scaled_deg_mat), method="ward.D2")
+memb=cutree(hc, k=kNum)
+clusters<-as.data.frame(memb)
+library(dplyr)
+cluster1<-filter(clusters, memb == "1")
+cluster2<-filter(clusters, memb == "2")
+cluster1<- as.vector(rownames(cluster1))
+cluster2<- as.vector(rownames(cluster2))
+library(enrichR) 
+if (websiteLive) {enriched1 <- enrichr(cluster1, dbs)} #enrichment cluster 1
+if (websiteLive) {enriched2 <- enrichr(cluster2, dbs)} #enrichment  cluster 2
+dataenrich<-enriched1[[1]]#Reactome
+library(dplyr)
+library(DESeq2)
+Ms2d<- as.data.frame (results(DE, contrast=c("Time","2 dpi","Intact")))
+Ms7d<- as.data.frame (results(DE, contrast=c("Time","7 dpi","Intact")))
+Ms2v7d<- as.data.frame (results(DE, contrast=c("Time","7 dpi","2 dpi")))
+temp <- Ms2d[order(Ms2d$log2FoldChange),]
+temp<-subset(temp, padj<0.005 & abs(log2FoldChange)>2)
+rm (temp)
+
+library(ggplot2)
+library(EnhancedVolcano)
+EnhancedVolcano(Ms2d, lab = rownames(Ms2d),
+                x = "log2FoldChange",
+                y = "padj",
+                title = "Mouse Intact vs 2 dpi",
+                pCutoff = 0.005,
+                FCcutoff = 2,
+                pointSize = 3.0, 
+                labSize = 3.5, col=c('black', 'black', 'black', 'red3'),
+                colAlpha = 1,
+                gridlines.major = FALSE,
+                drawConnectors = TRUE,
+                widthConnectors = 0.75,
+                caption = bquote(~Log[2]~ "fold change cutoff, 2; q-value cutoff, 0.005",),
+                subtitle = "Differential expresion")
+
+EnhancedVolcano(Ms7d, lab = rownames(Ms7d),
+                x = "log2FoldChange",
+                y = "padj",
+                title = "Mouse Intact vs 7 dpi",
+                pCutoff = 0.005,
+                FCcutoff = 2,
+                pointSize = 3.0, 
+                labSize = 3.5, col=c('black', 'black', 'black', 'red3'),
+                colAlpha = 1,
+                gridlines.major = FALSE,
+                drawConnectors = TRUE,
+                widthConnectors = 0.75,
+                caption = bquote(~Log[2]~ "fold change cutoff, 2; q-value cutoff, 0.005",),
+                subtitle = "Differential expresion")
+
+EnhancedVolcano(Ms2v7d, lab = rownames(Ms2v7d),
+                x = "log2FoldChange",
+                y = "padj",
+                title = "Mouse 2 dpi vs 7 dpi",
+                pCutoff = 0.005,
+                FCcutoff = 2,
+                pointSize = 3.0, #
+                labSize = 3.5, col=c('black', 'black', 'black', 'red3'),
+                colAlpha = 1,
+                gridlines.major = FALSE,
+                drawConnectors = TRUE,
+                widthConnectors = 0.75,
+                caption = bquote(~Log[2]~ "fold change cutoff, 2; q-value cutoff, 0.005",),
+                subtitle = "Differential expresion")
+
+library(clusterProfiler)
+library(enrichplot)
+library(ggplot2)
+organism <- "org.Mm.eg.db"
+BiocManager::install(organism, character.only = TRUE)
+temp <- Ms7d$log2FoldChange
+names(temp) <- row.names(Ms7d)
+temp
+temp<-na.omit(temp)
+temp <- sort(temp, decreasing = TRUE)
+gse <- gseGO(geneList=temp, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 5, 
+             maxGSSize = 1000, 
+             pvalueCutoff = 0.005, 
+             verbose = TRUE, 
+             OrgDb = organism, 
+             pAdjustMethod = "BH",
+             exponent = 1,
+             by= "fgsea")
+dotplot(gse, showCategory=10, split=".sign") + facet_grid(.~.sign)
+
+library(ggplot2)
+M27d <- data.frame (Process =c("Positive regulation of immune system process", "T cell activation", "Synapse signaling", "Vesicle-mediated transport in synapse", "Neurotransmitter transport"), 
+                    Gene_Ratio =c(0.32, 0.35, 0.47, 0.49, 0.56))
+M27d$Process <- factor(M27d$Process, levels=unique(M27d$Process))
+ggplot(data=M27d, aes(x=Gene_Ratio, y=Process)) +
+  geom_bar(stat="identity", color="black", fill="white") +theme_minimal() +ggtitle("2 dpi vs 7 dpi") + theme(text = element_text(size = 22))
+rm(M27d)
+
+library(clusterProfiler)
+library(enrichplot)
+organism <- "org.Mm.eg.db" 
+BiocManager::install(organism, character.only = TRUE)
+temp <- Ms2v7d$log2FoldChange
+names(temp) <- row.names(Ms2v7d)
+temp
+temp<-na.omit(temp)
+temp <- sort(temp, decreasing = TRUE)
+gse <- gseGO(geneList=temp, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 5, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.005, 
+             verbose = TRUE, 
+             OrgDb = organism, 
+             pAdjustMethod = "BH",
+             exponent = 1,
+             by= "fgsea")
+dotplot(gse, showCategory=10, split=".sign") + facet_grid(.~.sign)
+cnetplot(gse, categorySize="pvalue", foldChange=temp, showCategory = c("leukocyte mediated cytotoxicity", "positive regulation of cytokine production", "locomotory behavior"), cex_label_category=1, color_category= "purple", shadowtext= "category", cex_category= 1, cex_label_gene= 0.8) + scale_color_gradient2(name='Score', low='steelblue', high='red') +scale_size_continuous(range = c(2, 8))
+rm(gse, temp, temp2)
+
+#Axolotl Gene expression analysis:
+library("Rsubread")
+AxoCounts<- featureCounts(files = c("Axo_Intact.sorted.bam", "Axo_1dpi.sorted.bam", "Axo_6dpi.sorted.bam"), annot.ext = "AmexT_v47-AmexG_v6.0-DD.gtf", isGTFAnnotationFile = TRUE, GTF.attrType = "gene_id", isPairedEnd = TRUE)#Files bam obtained after the alingment with the reference genome Amexv6.
+ReadCountsAdj<- as.matrix(AxoCounts$counts)
+ReadCountsAdj<-ReadCountsAdj-.5 #Bootstrap resampling 
+ReadCountsAdj[ReadCountsAdj<0]=0.15 #Bootstrap resampling
+nn<-nrow(ReadCountsAdj)*ncol(ReadCountsAdj)
+bNoisyReads<-matrix(rpois(nn,ReadCountsAdj),ncol=ncol(ReadCountsAdj))#Bootstrap resampling following Poisson distribution
+#Rename cols and rows:
+colnames(bNoisyReads)<- c("Axo_Intact.sorted.bam(3)", "Axo_1dpi.sorted.bam(3)", "Axo_6dpi.sorted.bam(3)") #nombra columnas
+colnames(ReadCountsAdj)<- c("Axo_Intact.sorted.bam(3)", "Axo_1dpi.sorted.bam(3)", "Axo_6dpi.sorted.bam(3)")
+rownames(bNoisyReads) <- rownames(ReadCountsAdj)#
+#Obtaining sequencing read counts:
+AxoCounts1<- as.matrix(AxoCounts$counts)
+AxoCounts2 <- as.matrix(bNoisyReads)
+AxoCounts3 <- as.matrix (bNoisyReads)
+AxoCounts <- cbind(AxoCounts1, AxoCounts2, AxoCounts3) #Merging all frames for DESeq2 input
+rm(AxoCounts1, AxoCounts2, AxoCounts3, nn, ReadCountsAdj, bNoisyReads)
+write.csv(AxoCounts, "AxoCounts.csv")
+Axo_genes<-read.table("Gene_names.txt")
+p<-read.csv("Axolotl_Counts.csv", header = TRUE)
+rownames(p)<-p$X
+p$X<-NULL
+AxoCounts<-p#A
+rm(p)
+Time <- c("Intact", "Intact", "Intact", "1 dpi", "1 dpi", "1 dpi", "6 dpi", "6 dpi", "6 dpi")#
+dfs <- data.frame(Time)
+row.names(dfs)<-colnames(AxoCounts)
+dfs#
+library(DESeq2)
+dds <- DESeqDataSetFromMatrix(countData = AxoCounts, colData = dfs, design= ~ Time)
+DE <- DESeq(dds)
+Res<-results(DE)
+
+library(pheatmap)
+vst <- vst(DE)
+sele <- which(Res$padj < 0.005 & abs(Res$log2FoldChange)> 2)
+pheatmap(assay(vst)[sele, ], cluster_rows=TRUE, show_rownames=TRUE,
+         cluster_cols=FALSE, scale = "row", main = "Axolotl Spinal Cord DGE (row-based z-score)" )
+
+deg_mat = AxoCounts[sele,]#Hace un subset con una lista númerica que sirve como cordenada para indicar que fila jalar en el nuevo dataframe
+scaled_deg_mat = t(apply(deg_mat, 1, function(x) scale(x)))
+colnames(scaled_deg_mat) = colnames(deg_mat)
+library("gplots")
+heatmap.2(scaled_deg_mat, Colv = FALSE, labRow = FALSE, trace = "none", col = "bluered")
+kNum=3
+hc=hclust(dist(scaled_deg_mat), method="ward.D2")
+memb=cutree(hc, k=kNum)
+order_cl <- c(which(memb==1),which(memb==2),which(memb==3))# which(memb==4))
+clusters<-as.data.frame(memb)              
+library(dplyr)
+cluster1<-filter(clusters, memb == "1")
+cluster2<-filter(clusters, memb == "2")
+cluster3<-filter(clusters, memb == "3")
+cluster1<- as.vector(rownames(cluster1))
+cluster2<- as.vector(rownames(cluster2))
+cluster3<- as.vector(rownames(cluster3))
+rownames(Axo_genes)<-rownames(AxoCounts)
+cluster1<-Axo_genes[rownames(Axo_genes) %in% cluster1,]#subset
+cluster2<-Axo_genes[rownames(Axo_genes) %in% cluster2,]
+cluster3<-Axo_genes[rownames(Axo_genes) %in% cluster3,]
+
+library(enrichR) 
+if (websiteLive) {
+  enriched1 <- enrichr(cluster1, dbs)
+} #Obtiene el enrichment de cluster 1
+
+if (websiteLive) {
+  enriched2 <- enrichr(cluster2, dbs)
+} #Obtiene el enrichment de cluster 2
+
+if (websiteLive) {
+enriched3 <- enrichr(cluster3, dbs)
+} #Obtiene el enrichment de cluster 3
+
+dataenrich<-enriched3[[1]]#Escogí reactoma
+rm(dataenrich, enriched1,enriched2,enriched3)
+
+library(dplyr)
+library(DESeq2)
+Axo1d<- as.data.frame (results(DE, contrast=c("Time","1 dpi","Intact")))
+Axo6d<- as.data.frame (results(DE, contrast=c("Time","6 dpi","Intact")))
+Axo1v6d<- as.data.frame (results(DE, contrast=c("Time","6 dpi","1 dpi")))
+Axo1d<-cbind(Axo1d, Axo_genes)
+Axo6d<-cbind(Axo6d, Axo_genes)
+Axo1v6d<-cbind(Axo1v6d, Axo_genes)
+#Para ver el gráfico de barras de los genes
+temp <- Axo1v6d[order(Axo1v6d$log2FoldChange),]
+temp<-subset(temp, padj<0.005 & abs(log2FoldChange)>2)
+rm (temp) 
+
+library(ggplot2)
+library(EnhancedVolcano)
+library(ggrepel)
+EnhancedVolcano(Axo1v6d, lab = Axo1v6d$Gene_symbol,
+                x = "log2FoldChange",
+                y = "padj",
+                title = "Axolotl 1 dpi vs 6 dpi",
+                pCutoff = 0.005,
+                FCcutoff = 2,
+                pointSize = 3.0, #
+                labSize = 3.5, col=c('black', 'black', 'black', 'red3'),
+                colAlpha = 1,
+                gridlines.major = FALSE,
+                drawConnectors = TRUE,
+                widthConnectors = 0.75,
+                maxoverlapsConnectors = 5,
+                caption = bquote(~Log[2]~ "fold change cutoff, 2; q-value cutoff, 0.005",),
+                subtitle = "Differential expresion")
+
+library(clusterProfiler)
+library(enrichplot)
+organism <- "org.Hs.eg.db" #Para instalar mouse en la anotación
+BiocManager::install(organism, character.only = TRUE)
+temp<-Axo1d[!duplicated(Axo1d$Gene_symbol), ]
+temp<-na.omit(temp)
+temp<- temp[order(temp$Gene_symbol), ]
+rownames(temp)<-NULL
+temp<-temp[c(-546:-27034),]
+temp2 <- temp$log2FoldChange
+names(temp2) <- temp$Gene_symbol
+temp2
+temp2 <- sort(temp2, decreasing = TRUE)
+gse <- gseGO(geneList=temp2, 
+             ont ="BP", 
+             keyType = "SYMBOL", 
+             minGSSize = 5, 
+             maxGSSize = 10000, 
+             pvalueCutoff = 0.005, 
+             verbose = TRUE, 
+             OrgDb = organism, 
+             pAdjustMethod = "BH",
+             exponent = 1,
+             by= "fgsea")
+dotplot(gse, showCategory=10, split=".sign") + facet_grid(.~.sign)
+cnetplot(gse, categorySize="pvalue", foldChange=temp2, showCategory = c("RNA processing"), cex_label_category=1, color_category= "purple", shadowtext= "category", cex_category= 1, cex_label_gene= 0.8) + scale_color_gradient2(name='Score', low='steelblue', high='red') +scale_size_continuous(range = c(2, 8))
+rm(gse, temp, temp2)
+
+library(ggplot2)
+A16d <- data.frame (Process =c("Regulation of blood coagulation", "External encapsulating structure organization", "Extracellular matrix organization", "Collagen fibril organization", "Ribosome biogenesis"), 
+                    Gene_Ratio =c(0.29, 0.4, 0.42, 0.5, 0.65))
+A16d$Process <- factor(A16d$Process, levels=unique(A16d$Process))
+ggplot(data=A16d, aes(x=Gene_Ratio, y=Process)) +
+  geom_bar(stat="identity", color="black", fill="white") +theme_minimal() +ggtitle("1 dpi vs 6 dpi") + theme(text = element_text(size = 22))
+rm(A1d, A6d, A16d)
+
+#VennDiagram para todas sp
+A2<-subset(Axo6d, padj<0.005 & abs(log2FoldChange)>2)
+A2<-na.omit(A2)
+A2<-as.vector(A2$Gene_symbol)
+
+R2<-subset(Rat7d, padj<0.005 & abs(log2FoldChange)>2)
+R2<-na.omit(R2)
+R2<-as.vector(rownames(R2))
+R2<-toupper(R2)
+
+M2<-subset(Ms7d, padj<0.005 & abs(log2FoldChange)>2)
+M2<-na.omit(M2)
+M2<-as.vector(rownames(M2))
+M2<-toupper(M2)
+
+library(VennDiagram)
+library(RColorBrewer)
+#myCol <- brewer.pal(2, "Set2")
+venn.diagram(x = list(A2, R2, M2),category.names = c("Axolotl" , "Rat", "Mouse"), filename = "AxoSpinalChronic_venn.png", output=TRUE,
+             lwd = 2,
+             lty = 'blank',
+             fill = c(("#440154ff"), ('#21908dff'), ("#543A01")),
+             cex = 0.8,
+             fontface = "bold",
+             fontfamily = "sans",
+             cat.cex = 0.8,
+             cat.fontface = "bold",
+             cat.default.pos = "outer",
+             cat.fontfamily = "sans")
+
+p<-intersect(A1,R1)
+p<-intersect(p, M1)
+p2<-intersect(A2,R2)
+p2<-intersect(p2,M2)
+
+library(enrichR) 
+if (websiteLive) {
+  enriched1 <- enrichr(p, dbs)
+} 
+
+if (websiteLive) {
+  enriched2 <- enrichr(p2, dbs)
+}
+
+dataenrich<-enriched2[[2]]#Escogí KEGG
+rm(p,p2,A1,A2,R1,R2,M1,M2, cluster1, cluster2,cluster3,maxoverlapsConnectors, order_cl, organism, sele, Time, dfs, dds, DE, Res, vst)
+#Tablas suplementarias
+write.csv(Rat7d, "Rat7d.csv")
 
 
          
